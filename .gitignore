@@ -24,6 +24,12 @@
 .DS_Store
 *.pem
 
+# RSA keys folder
+/keys/
+
+# Reference files from other repos (read-only)
+/reference/
+
 # debug
 npm-debug.log*
 yarn-debug.log*
@@ -39,3 +45,22 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+/src/generated/prisma
+
+# IDE/Editor
+.claude/
+.agents/
+.windsurf/
+.vscode/
+.idea/
+
+# Local database
+*.db
+dev.db
+
+# Skills
+skills-lock.json
+
+# Docs (local only)
+/doc/

@@ -1,0 +1,225 @@
+// =============================================================================
+// Prisma Schema untuk vg_payment
+// Database khusus integrasi BCA VA dan rekonsiliasi pembayaran
+// Using SQLite for local development/testing
+// =============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+// =============================================================================
+// VIRTUAL ACCOUNT
+// Mapping VA number ke prospecting (closing)
+// =============================================================================
+
+model VirtualAccount {
+  id              String    @id @default(uuid())
+
+  // VA number = partnerServiceId (5 digit) + customerNo (max 18 digit)
+  vaNumber        String    @unique @map("va_number")
+  customerNo      String    @map("customer_no")
+
+  // Referensi ke prospecting di vg_prospect (cross-DB, tidak pakai FK)
+  prospectingId   Int       @map("prospecting_id")
+
+  // Denormalized customer info untuk quick access
+  customerName    String?   @map("customer_name")
+  customerPhone   String?   @map("customer_phone")
+
+  // Unit bisnis (untuk multi-UB support)
+  unitBisnis      String    @map("unit_bisnis")
+
+  // Amount yang ditagih (stored as Float for SQLite)
+  amount          Float
+
+  // Status VA
+  status          String    @default("ACTIVE")
+
+  // Timestamps
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  expiresAt       DateTime? @map("expires_at")
+  paidAt          DateTime? @map("paid_at")
+
+  // User/agent yang membuat VA
+  createdBy       String?   @map("created_by")
+
+  // Catatan tambahan
+  notes           String?
+
+  // Relations
+  payments        VaPayment[]
+
+  @@index([prospectingId])
+  @@index([status])
+  @@index([unitBisnis])
+  @@map("virtual_accounts")
+}
+
+// =============================================================================
+// VA PAYMENT
+// Record setiap notifikasi pembayaran dari BCA
+// =============================================================================
+
+model VaPayment {
+  id                  String    @id @default(uuid())
+
+  // Referensi ke VA
+  vaId                String    @map("va_id")
+  virtualAccount      VirtualAccount @relation(fields: [vaId], references: [id], onDelete: Cascade)
+
+  // Transaction ID dari BCA (untuk idempotency check)
+  bcaTrxId            String    @unique @map("bca_trx_id")
+
+  // Payment details
+  amountPaid          Float     @map("amount_paid")
+  paymentDate         DateTime  @map("payment_date")
+
+  // BCA reference numbers
+  customerNo          String    @map("customer_no")
+  partnerServiceId    String    @map("partner_service_id")
+
+  // Raw request/response untuk audit
+  bcaRequestBody      String?   @map("bca_request_body")
+  bcaResponseBody     String?   @map("bca_response_body")
+
+  // Payment channel info dari BCA
+  paymentChannel      String?   @map("payment_channel")
+  sourceBankCode      String?   @map("source_bank_code")
+
+  // Status processing internal
+  status              String    @default("RECEIVED")
+
+  // Error handling
+  errorMessage        String?   @map("error_message")
+  retryCount          Int       @default(0) @map("retry_count")
+
+  // Timestamps
+  createdAt           DateTime  @default(now()) @map("created_at")
+  processedAt         DateTime? @map("processed_at")
+
+  // Relations
+  journalEntries      JournalEntry[]
+
+  @@index([vaId])
+  @@index([status])
+  @@map("va_payments")
+}
+
+// =============================================================================
+// JOURNAL ENTRY
+// Log push jurnal ke Digital360
+// =============================================================================
+
+model JournalEntry {
+  id                  String    @id @default(uuid())
+
+  // Referensi ke payment yang trigger jurnal
+  vaPaymentId         String    @map("va_payment_id")
+  vaPayment           VaPayment @relation(fields: [vaPaymentId], references: [id], onDelete: Cascade)
+
+  // Journal details
+  journalType         String    @map("journal_type")  // DEBIT or CREDIT
+  amount              Float
+  description         String?
+
+  // Referensi ke Digital360
+  digital360JournalId String?   @map("digital360_journal_id")
+
+  // Status push
+  status              String    @default("PENDING")
+
+  // Request/response ke Digital360
+  requestBody         String?   @map("request_body")
+  responseBody        String?   @map("response_body")
+
+  // Error handling
+  errorMessage        String?   @map("error_message")
+  retryCount          Int       @default(0) @map("retry_count")
+
+  // Timestamps
+  createdAt           DateTime  @default(now()) @map("created_at")
+  pushedAt            DateTime? @map("pushed_at")
+
+  @@index([vaPaymentId])
+  @@index([status])
+  @@map("journal_entries")
+}
+
+// =============================================================================
+// BCA API LOG
+// Audit trail semua request/response ke BCA API
+// =============================================================================
+
+model BcaApiLog {
+  id              String    @id @default(uuid())
+
+  // Request info
+  endpoint        String
+  method          String
+  requestHeaders  String?   @map("request_headers")
+  requestBody     String?   @map("request_body")
+
+  // Response info
+  responseStatus  Int?      @map("response_status")
+  responseHeaders String?   @map("response_headers")
+  responseBody    String?   @map("response_body")
+
+  // Performance
+  durationMs      Int?      @map("duration_ms")
+
+  // Context
+  operation       String?
+  vaNumber        String?   @map("va_number")
+
+  // Error tracking
+  isError         Boolean   @default(false) @map("is_error")
+  errorMessage    String?   @map("error_message")
+
+  // Timestamp
+  createdAt       DateTime  @default(now()) @map("created_at")
+
+  @@index([endpoint])
+  @@index([operation])
+  @@index([isError])
+  @@map("bca_api_logs")
+}
+
+// =============================================================================
+// OAUTH TOKEN CACHE
+// Cache token OAuth BCA
+// =============================================================================
+
+model OAuthToken {
+  id            String    @id @default("singleton")
+  accessToken   String    @map("access_token")
+  tokenType     String    @map("token_type")
+  expiresAt     DateTime  @map("expires_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  @@map("oauth_tokens")
+}
+
+// =============================================================================
+// MOCK PROSPECTINGS (for SQLite testing only)
+// In production, this data comes from vg_prospect database
+// =============================================================================
+
+model Prospecting {
+  id              Int       @id @default(autoincrement())
+  status          String?
+  instansi_ub     String?   // Unit bisnis
+  kontak_nama     String?   // Customer name
+  kontak_telepon  String?   // Customer phone
+  deleted_at      DateTime?
+  created_at      DateTime  @default(now())
+  updated_at      DateTime  @updatedAt
+
+  @@map("prospectings")
+}
