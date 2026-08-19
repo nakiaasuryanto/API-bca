@@ -4,6 +4,22 @@
  * Logs semua request/response ke BCA API untuk audit trail
  */
 
+/**
+ * Mask sensitive headers for logging
+ */
+export function maskSensitiveHeaders(headers: Record<string, string>): Record<string, string> {
+  const masked = { ...headers }
+  const sensitiveKeys = ['authorization', 'x-api-key', 'x-signature', 'cookie']
+
+  for (const key of Object.keys(masked)) {
+    if (sensitiveKeys.includes(key.toLowerCase())) {
+      masked[key] = '***MASKED***'
+    }
+  }
+
+  return masked
+}
+
 export interface BcaApiLogEntry {
   endpoint: string
   method: string
