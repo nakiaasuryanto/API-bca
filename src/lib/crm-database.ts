@@ -106,7 +106,21 @@ export async function getProspecting(prospectingId: number): Promise<{
     )
 
     const results = rows as mysql.RowDataPacket[]
-    return results[0] || null
+    if (results.length === 0) return null
+    return results[0] as {
+      id: number
+      status: string | null
+      kontak_nama: string | null
+      kontak_telepon: string | null
+      kontak_email: string | null
+      instansi_nama: string | null
+      unit_bisnis: string | null
+      produk: string | null
+      bahan: string | null
+      jumlah: number | null
+      harga_satuan: number
+      omzet: number
+    }
   } catch (error) {
     console.error(`[PKL DB] Failed to get prospecting ${prospectingId}:`, error)
     return null
@@ -190,7 +204,16 @@ export async function getVAByNumber(vaNumber: string): Promise<{
     )
 
     const results = rows as mysql.RowDataPacket[]
-    return results[0] || null
+    if (results.length === 0) return null
+    return results[0] as {
+      id: string
+      va_number: string
+      customer_no: string
+      prospecting_id: number
+      customer_name: string | null
+      amount: number
+      status: string
+    }
   } catch (error) {
     console.error(`[PKL DB] Failed to get VA ${vaNumber}:`, error)
     return null
@@ -219,7 +242,13 @@ export async function getVAByProspectingId(prospectingId: number): Promise<{
     )
 
     const results = rows as mysql.RowDataPacket[]
-    return results[0] || null
+    if (results.length === 0) return null
+    return results[0] as {
+      id: string
+      va_number: string
+      amount: number
+      status: string
+    }
   } catch (error) {
     console.error(`[PKL DB] Failed to get VA for prospecting ${prospectingId}:`, error)
     return null
@@ -648,7 +677,20 @@ export async function getProspectingForTransaction(prospectingId: number): Promi
     )
 
     const results = rows as mysql.RowDataPacket[]
-    return results[0] || null
+    if (results.length === 0) return null
+    return results[0] as {
+      id: number
+      kontakNama: string
+      kontakTelepon: string | null
+      kontakEmail: string | null
+      instansiNama: string | null
+      instansiAlamat: string | null
+      produk: string | null
+      bahan: string | null
+      jumlah: number | null
+      hargaSatuan: number
+      omzet: number
+    }
   } catch (error) {
     console.error(`[PKL DB] Failed to get prospecting for transaction:`, error)
     return null
