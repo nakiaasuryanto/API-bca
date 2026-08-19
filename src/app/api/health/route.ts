@@ -5,51 +5,32 @@
  */
 
 import { NextResponse } from 'next/server'
-import { getPrismaClient } from '@/lib/database'
-import { checkCrmConnection, isCrmDevMode } from '@/lib/crm-database'
+import { checkPklConnection } from '@/lib/crm-database'
 
 export async function GET() {
-  const checks: Record<string, 'ok' | 'error' | 'not_configured'> = {
+  const checks: Record<string, 'ok' | 'error'> = {
     server: 'ok',
     database: 'error',
-    crm: 'not_configured',
   }
 
-  // Check database connection (vg_payment)
+  // Check PKL MySQL connection
   try {
-    const prisma = getPrismaClient()
-    // Use a simple count query instead of raw SQL
-    await prisma.oAuthToken.count()
-    checks.database = 'ok'
+    const connected = await checkPklConnection()
+    checks.database = connected ? 'ok' : 'error'
   } catch (error) {
     console.error('[Health] Database check failed:', error)
     checks.database = 'error'
   }
 
-  // Check CRM database connection (vg_prospect)
-  // In dev mode, uses SQLite; in prod, uses MySQL
-  try {
-    const connected = await checkCrmConnection()
-    if (isCrmDevMode()) {
-      checks.crm = connected ? 'dev' : 'error'
-    } else {
-      checks.crm = connected ? 'ok' : 'error'
-    }
-  } catch (error) {
-    console.error('[Health] CRM database check failed:', error)
-    checks.crm = 'error'
-  }
-
-  // CRM is optional, so only check server + database for health status
-  const coreOk = checks.server === 'ok' && checks.database === 'ok'
+  const isHealthy = checks.server === 'ok' && checks.database === 'ok'
 
   return NextResponse.json(
     {
-      status: coreOk ? 'healthy' : 'unhealthy',
+      status: isHealthy ? 'healthy' : 'unhealthy',
       checks,
       timestamp: new Date().toISOString(),
-      version: process.env.npm_package_version || '1.0.0',
+      version: '0.1.0',
     },
-    { status: coreOk ? 200 : 503 }
+    { status: isHealthy ? 200 : 503 }
   )
 }

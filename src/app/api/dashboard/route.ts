@@ -1,85 +1,51 @@
 /**
  * GET /api/dashboard
  *
- * Get dashboard data: stats, VAs, payments
+ * Get dashboard data: stats, VAs, payments (from PKL MySQL)
  */
 
 import { NextResponse } from 'next/server'
-import { getPrismaClient } from '@/lib/database'
+import { getDashboardStats, getAllVAs, getRecentPayments } from '@/lib/crm-database'
 
 export async function GET() {
   try {
-    const prisma = getPrismaClient()
-
-    // Get VA stats
-    const [totalVa, activeVa, paidVa, expiredVa] = await Promise.all([
-      prisma.virtualAccount.count(),
-      prisma.virtualAccount.count({ where: { status: 'ACTIVE' } }),
-      prisma.virtualAccount.count({ where: { status: 'PAID' } }),
-      prisma.virtualAccount.count({ where: { status: 'EXPIRED' } }),
+    // Get all data from PKL MySQL
+    const [stats, recentVas, recentPayments] = await Promise.all([
+      getDashboardStats(),
+      getAllVAs(),
+      getRecentPayments(10),
     ])
-
-    // Get recent VAs
-    const recentVas = await prisma.virtualAccount.findMany({
-      take: 10,
-      orderBy: { createdAt: 'desc' },
-      include: {
-        payments: {
-          take: 1,
-          orderBy: { createdAt: 'desc' },
-        },
-      },
-    })
-
-    // Get recent payments
-    const recentPayments = await prisma.vaPayment.findMany({
-      take: 10,
-      orderBy: { createdAt: 'desc' },
-      include: {
-        virtualAccount: {
-          select: {
-            vaNumber: true,
-            customerName: true,
-          },
-        },
-      },
-    })
-
-    // Calculate total revenue
-    const totalRevenue = await prisma.vaPayment.aggregate({
-      _sum: { amountPaid: true },
-      where: { status: 'COMPLETED' },
-    })
 
     return NextResponse.json({
       success: true,
       data: {
         stats: {
-          totalVa,
-          activeVa,
-          paidVa,
-          expiredVa,
-          totalRevenue: totalRevenue._sum.amountPaid || 0,
+          totalVa: stats.va.total,
+          activeVa: stats.va.active,
+          paidVa: stats.va.paid,
+          expiredVa: 0, // Not tracked currently
+          totalRevenue: stats.va.totalRevenue,
+          totalProspecting: stats.prospecting.total,
+          closingProspecting: stats.prospecting.closing,
+          closedProspecting: stats.prospecting.closed,
         },
         recentVas: recentVas.map((va) => ({
           id: va.id,
-          vaNumber: va.vaNumber,
-          customerName: va.customerName,
+          vaNumber: va.va_number,
+          customerName: va.customer_name || va.kontak_nama,
           amount: va.amount,
           status: va.status,
-          createdAt: va.createdAt,
-          paidAt: va.paidAt,
-          expiresAt: va.expiresAt,
+          createdAt: va.created_at,
+          paidAt: va.paid_at,
+          prospectingStatus: va.prospecting_status,
         })),
         recentPayments: recentPayments.map((p) => ({
           id: p.id,
-          bcaTrxId: p.bcaTrxId,
-          vaNumber: p.virtualAccount.vaNumber,
-          customerName: p.virtualAccount.customerName,
-          amountPaid: p.amountPaid,
-          status: p.status,
-          paymentDate: p.paymentDate,
-          createdAt: p.createdAt,
+          bcaTrxId: p.bca_trx_id,
+          vaNumber: p.va_number,
+          customerName: p.customer_name,
+          amountPaid: p.amount_paid,
+          paymentDate: p.payment_date,
         })),
       },
     })

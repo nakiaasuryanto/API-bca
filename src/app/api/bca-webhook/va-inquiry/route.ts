@@ -6,15 +6,14 @@
  *
  * Flow:
  * 1. Verify signature dari BCA
- * 2. Lookup VA di database kita
+ * 2. Lookup VA di PKL MySQL database
  * 3. Return VA details jika valid, atau error code jika tidak
  */
 
 import { NextRequest, NextResponse } from 'next/server'
-import { getPrismaClient } from '@/lib/database'
-import { logBcaApiCall } from '@/lib/bca/logger'
+import { getVAByNumber } from '@/lib/crm-database'
 import { getBcaConfig, BCA_RESPONSE_CODES } from '@/lib/bca/config'
-import { verifySignatureService, generateTimestamp } from '@/lib/bca/signature'
+import { generateTimestamp } from '@/lib/bca/signature'
 
 interface VaInquiryRequest {
   partnerServiceId: string
@@ -49,7 +48,6 @@ interface VaInquiryResponse {
 }
 
 export async function POST(request: NextRequest) {
-  const startTime = Date.now()
   let requestBody: VaInquiryRequest | null = null
 
   try {
@@ -61,14 +59,7 @@ export async function POST(request: NextRequest) {
       return createResponse('4000000', 'Invalid request body', 400)
     }
 
-    // 2. Verify signature dari BCA (optional di sandbox, wajib di production)
-    // TODO: Implement signature verification
-    // const signature = request.headers.get('X-SIGNATURE')
-    // const timestamp = request.headers.get('X-TIMESTAMP')
-    // const accessToken = request.headers.get('Authorization')?.replace('Bearer ', '')
-    // if (!verifySignatureService('POST', '/api/bca-webhook/va-inquiry', accessToken, rawBody, timestamp, signature)) {
-    //   return createResponse('4010000', 'Invalid signature', 401)
-    // }
+    // 2. TODO: Verify signature dari BCA (wajib di production)
 
     // 3. Extract VA number
     const vaNumber = requestBody.virtualAccountNo?.trim()
@@ -76,21 +67,8 @@ export async function POST(request: NextRequest) {
       return createResponse('4000001', 'Missing virtualAccountNo', 400)
     }
 
-    // 4. Lookup VA di database
-    const prisma = getPrismaClient()
-    const va = await prisma.virtualAccount.findUnique({
-      where: { vaNumber },
-    })
-
-    // Log request
-    await logBcaApiCall({
-      endpoint: '/api/bca-webhook/va-inquiry',
-      method: 'POST',
-      requestBody: rawBody,
-      operation: 'VA_INQUIRY_WEBHOOK',
-      vaNumber,
-      durationMs: Date.now() - startTime,
-    })
+    // 4. Lookup VA di PKL MySQL
+    const va = await getVAByNumber(vaNumber)
 
     // 5. Handle cases
     if (!va) {
@@ -103,7 +81,7 @@ export async function POST(request: NextRequest) {
       return createResponse(BCA_RESPONSE_CODES.VA_ALREADY_PAID, 'Virtual Account already paid', 409)
     }
 
-    if (va.status === 'EXPIRED' || (va.expiresAt && va.expiresAt < new Date())) {
+    if (va.status === 'EXPIRED') {
       console.log(`[VA Inquiry] VA expired: ${vaNumber}`)
       return createResponse('4042413', 'Virtual Account expired', 404)
     }
@@ -120,18 +98,15 @@ export async function POST(request: NextRequest) {
       responseMessage: 'Success',
       virtualAccountData: {
         partnerServiceId: config.vaPartnerServiceId.padStart(5, ' '),
-        customerNo: va.customerNo.padStart(18, ' '),
-        virtualAccountNo: va.vaNumber,
-        virtualAccountName: va.customerName || 'Customer',
-        virtualAccountPhone: va.customerPhone || undefined,
+        customerNo: va.customer_no.padStart(18, ' '),
+        virtualAccountNo: va.va_number,
+        virtualAccountName: va.customer_name || 'Customer',
         totalAmount: {
           value: va.amount.toString() + '.00',
           currency: 'IDR',
         },
-        expiredDate: va.expiresAt?.toISOString(),
         additionalInfo: {
-          prospectingId: va.prospectingId,
-          unitBisnis: va.unitBisnis,
+          prospectingId: va.prospecting_id,
         },
       },
     }
@@ -147,17 +122,6 @@ export async function POST(request: NextRequest) {
     })
   } catch (error) {
     console.error('[VA Inquiry] Error:', error)
-
-    await logBcaApiCall({
-      endpoint: '/api/bca-webhook/va-inquiry',
-      method: 'POST',
-      requestBody: JSON.stringify(requestBody),
-      operation: 'VA_INQUIRY_WEBHOOK',
-      durationMs: Date.now() - startTime,
-      isError: true,
-      errorMessage: error instanceof Error ? error.message : String(error),
-    })
-
     return createResponse('5000000', 'Internal server error', 500)
   }
 }
